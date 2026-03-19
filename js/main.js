@@ -1,0 +1,377 @@
+import * as Engine from './engine.js';
+import * as UI from './ui.js';
+import * as Multi from './multiplayer.js';
+
+let state = {
+    room: null,
+    role: null,
+    selected: null,
+    activeItem: null,
+    active: false,
+    lastData: null,
+    timerId: null,
+    botInterval: null,
+    isBotGame: false
+};
+
+let botIsThinking = false;
+
+/**
+ * runBotTurn
+ * Logic for the AI opponent (Harder than Normal + Strategic Items).
+ */
+async function runBotTurn() {
+    if (!state.active || state.role !== 'p1' || !state.lastData || botIsThinking) return;
+    if (state.lastData.status !== 'playing') return;
+    if (!state.lastData.players?.p2?.isBot) return;
+
+    if (Math.random() > 0.95) return;
+
+    botIsThinking = true;
+
+    try {
+        const thinkingTime = 400 + Math.random() * 400;
+        await new Promise(resolve => setTimeout(resolve, thinkingTime));
+
+        if (!state.active || state.lastData.status !== 'playing') {
+            botIsThinking = false;
+            return;
+        }
+
+        const p2Inventory = state.lastData.players.p2.inventory || { bomb: 0, dynamite: 0 };
+        const hasBomb = (p2Inventory.bomb || 0) > 0;
+        const hasDynamite = (p2Inventory.dynamite || 0) > 0;
+
+        // 1. STRATEGIC ITEM USAGE (50% chance if items available)
+        if ((hasBomb || hasDynamite) && Math.random() < 0.5) {
+            const itemToUse = hasDynamite ? 'dynamite' : 'bomb';
+            const target = {
+                r: Math.floor(2 + Math.random() * 4),
+                c: Math.floor(2 + Math.random() * 4)
+            };
+
+            // BOT LINGER FOR ITEMS: 
+            // Show the red glow on the target cell before it explodes
+            await Multi.updatePointer(state.room, 'p2', target.r, target.c);
+            await new Promise(resolve => setTimeout(resolve, 600));
+
+            // executeItemDropForPlayer now handles visuals and the 400ms pause
+            await executeItemDropForPlayer('p2', itemToUse, target);
+
+            // Clear pointer
+            await Multi.updatePointer(state.room, 'p2', null, null);
+            botIsThinking = false;
+            return; 
+        }
+
+        // 2. NORMAL SWIPE LOGIC
+        const moves = Engine.findAllPossibleMoves(state.lastData.grid);
+        const bestMove = Engine.pickBestMove(moves);
+
+        if (bestMove) {
+
+           // Trigger .p2-cursor (bright red glow)
+            await Multi.updatePointer(state.room, 'p2', bestMove.origin.r, bestMove.origin.c);
+            // Wait 500ms
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            if (state.active && state.lastData.status === 'playing') {
+                const isValid = Engine.validateBotMove(state.lastData.grid, bestMove.origin, bestMove.target);
+                if (isValid) {
+                    await executeMoveForPlayer('p2', bestMove.origin, bestMove.target);
+                }
+            }
+            // STEP 2B: CLEANUP
+            // Briefly show the destination tile before hiding the red cursor
+            await Multi.updatePointer(state.room, 'p2', bestMove.target.r, bestMove.target.c);
+            setTimeout(() => Multi.updatePointer(state.room, 'p2', null, null), 200);
+        }
+    } catch (err) {
+        console.error("Bot AI Error:", err);
+    } finally {
+        botIsThinking = false;
+    }
+}
+
+/**
+ * executeItemDropForPlayer
+ * Processes Bomb/Dynamite logic with a multi-stage cinematic flow.
+ */
+async function executeItemDropForPlayer(role, type, target) {
+    if (!state.room || !state.lastData) return;
+
+    const playerState = state.lastData.players[role];
+    const inventory = playerState?.inventory || { bomb: 0, dynamite: 0 };
+    const itemCount = inventory[type] || 0;
+
+    if (itemCount <= 0) {
+        if (role === state.role) UI.showToast(`No ${type}s left!`);
+        return;
+    }
+
+    try {
+        // --- PHASE 1: PREPARATION ---
+        const coords = Engine.getExplosionCoords(type, target.r, target.c);
+
+        // --- PHASE 2: VISUAL DESTRUCTION ---
+        // Trigger the CSS animations and screen shake
+        UI.triggerExplosionVFX(coords);
+        UI.triggerImpact(target.r, target.c);
+
+        // --- PHASE 3: DATA DESTRUCTION (Immediate) ---
+        // We clear the data but don't refill yet
+        const explosionResult = Engine.processExplosion(state.lastData.grid, coords);
+
+        // --- PHASE 4: DRAMATIC PAUSE ---
+        // Wait for the .tile-explode CSS (0.4s) to finish shrinking
+        await new Promise(resolve => setTimeout(resolve, 600));
+
+        // --- PHASE 5: REFILL & CASCADE ---
+        // Now that the tiles are "gone," let gravity and new tiles take over
+        const finalCascade = Engine.processGridMatches(explosionResult.grid);
+
+        // --- PHASE 6: SCORE & INVENTORY UPDATES ---
+        const updatedInventory = { ...inventory };
+        updatedInventory[type]--;
+
+        // Add rewards gained from any cascaded matches
+        if (finalCascade.rewards) {
+            updatedInventory.bomb = Math.min((updatedInventory.bomb || 0) + finalCascade.rewards.bomb, 3);
+            updatedInventory.dynamite = Math.min((updatedInventory.dynamite || 0) + finalCascade.rewards.dynamite, 2);
+        }
+
+        const totalPointsEarned = explosionResult.explosionScore + (finalCascade.totalScore * 10);
+
+        const updates = {
+            grid: finalCascade.grid,
+            [`players/${role}/score`]: (playerState.score || 0) + totalPointsEarned,
+            [`players/${role}/inventory`]: updatedInventory
+        };
+
+        // --- PHASE 7: SYNC TO SERVER ---
+        await Multi.updateGameState(state.room, updates);
+
+    } catch (error) {
+        console.error("Execute Item Error:", error);
+    }
+}
+
+/**
+ * executeMoveForPlayer
+ * Refactored with Adjacency Guard and Match Simulation (Gatekeeper Logic).
+ */
+async function executeMoveForPlayer(role, origin, target) {
+    if (!state.room || !state.lastData || !origin || !target) return;
+
+    try {
+        // 1. Adjacency Guard: Check Manhattan Distance
+        const distance = Math.abs(origin.r - target.r) + Math.abs(origin.c - target.c);
+        if (distance !== 1) {
+            if (role === state.role) {
+                UI.triggerShake(origin, target);
+            }
+            return;
+        }
+
+        // 2. Match Simulation: Create gridCopy and swap tiles
+        let gridCopy = JSON.parse(JSON.stringify(state.lastData.grid));
+        const temp = gridCopy[origin.r][origin.c];
+        gridCopy[origin.r][origin.c] = gridCopy[target.r][target.c];
+        gridCopy[target.r][target.c] = temp;
+
+        // 3. Logic Gate: Find matches on the simulated swap
+        const { coords } = Engine.findMatches(gridCopy);
+
+        if (coords && coords.length > 0) {
+            // Valid Match Found: Refill and update global state
+            const { totalScore, rewards } = Engine.processGridMatches(gridCopy);
+            const playerState = state.lastData.players[role];
+            const currentScore = playerState.score || 0;
+            const currentInv = playerState.inventory || { bomb: 0, dynamite: 0 };
+
+            const newBombCount = Math.min((currentInv.bomb || 0) + rewards.bomb, 3);
+            const newDynamiteCount = Math.min((currentInv.dynamite || 0) + rewards.dynamite, 2);
+
+            await Multi.updateGameState(state.room, {
+                grid: gridCopy,
+                [`players/${role}/score`]: currentScore + (totalScore * 10),
+                [`players/${role}/inventory/bomb`]: newBombCount,
+                [`players/${role}/inventory/dynamite`]: newDynamiteCount
+            });
+        } else {
+            // 4. Revert Logic: No match found, don't update DB, just shake locally
+            if (role === state.role) {
+                UI.triggerShake(origin, target);
+            }
+        }
+    } catch (err) {
+        console.error("Execution Error:", err);
+    }
+}
+
+
+/**
+ * initSync
+ */
+function initSync() {
+    if (!state.room) return;
+    
+    let lastGridJson = "";
+
+    Multi.listenToRoom(state.room, (data) => {
+        if (!data) return;
+        
+            const currentGridJson = JSON.stringify(data.grid);
+        if (lastGridJson !== "" && currentGridJson !== lastGridJson) {
+            // If it was an explosion (lots of nulls), trigger a shake for BOTH players
+            if (currentGridJson.includes('null')) {
+                UI.triggerImpact(3, 3); // Shake the whole board
+            }
+        }
+
+        lastGridJson = currentGridJson;
+
+        state.lastData = data;
+
+        requestAnimationFrame(() => {
+            UI.renderSharedBoard(data, state.role, state.selected, state.activeItem);
+            
+            if (data.timeLeft !== undefined && UI.elements.timer) {
+                UI.elements.timer.innerText = data.timeLeft;
+            }
+            if (data.players?.p1 && UI.elements.score1) {
+                UI.elements.score1.innerText = (data.players.p1.score || 0).toString().padStart(4, '0');
+            }
+            if (data.players?.p2 && UI.elements.score2) {
+                UI.elements.score2.innerText = (data.players.p2.score || 0).toString().padStart(4, '0');
+            }
+        });
+
+        if (data.status === 'playing' && !state.active) {
+            state.active = true;
+            UI.elements.overlay.classList.add('hidden');
+            if (state.role === 'p1') {
+                startTimer();
+                if (data.players?.p2?.isBot) {
+                    runBotTurn();
+                    state.botInterval = setInterval(runBotTurn, 3000);
+                }
+            }
+        }
+
+        if (data.status === 'finished' && state.active) {
+            state.active = false;
+            clearInterval(state.timerId);
+            clearInterval(state.botInterval);
+            UI.showResultScreen(data, state.role);
+        }
+    });
+}
+
+/**
+ * startTimer
+ */
+function startTimer() {
+    if (state.role !== 'p1' || state.timerId) return;
+
+    let timeLeft = 90;
+    state.timerId = setInterval(async () => {
+        timeLeft--;
+        if (timeLeft <= 0) {
+            clearInterval(state.timerId);
+            state.timerId = null;
+            
+            const p1s = state.lastData?.players?.p1?.score || 0;
+            const p2s = state.lastData?.players?.p2?.score || 0;
+            const winner = p1s > p2s ? 'p1' : (p2s > p1s ? 'p2' : 'draw');
+
+            await Multi.updateGameState(state.room, { 
+                status: 'finished', 
+                timeLeft: 0,
+                winner: winner
+            });
+        } else {
+            await Multi.updateGameState(state.room, { timeLeft });
+        }
+    }, 1000);
+}
+
+/**
+ * startBotGame
+ */
+window.addEventListener('startBotGame', async () => {
+    const id = 'BOT-' + Math.floor(1000 + Math.random() * 9000).toString();
+    const seed = Date.now();
+
+    state.role = 'p1';
+    state.room = id;
+    state.isBotGame = true;
+
+    Engine.setSeed(seed);
+    const grid = Engine.generateSeededGrid();
+
+    await Multi.createRoom(id, seed, 100, grid);
+
+    await Multi.updateGameState(id, {
+        status: 'playing',
+        'players/p2': {
+            name: 'AI-Hard',
+            score: 0,
+            isBot: true,
+            inventory: { bomb: 0, dynamite: 0 }
+        }
+    });
+
+    initSync();
+});
+
+window.addEventListener('tileSwipe', async (e) => {
+    const { origin, target } = e.detail;
+    if (!state.active || !state.room || !state.lastData) return;
+    await executeMoveForPlayer(state.role, origin, target);
+});
+
+
+window.addEventListener('itemDrop', async (e) => {
+    const { type, target } = e.detail;
+    if (!state.room || !state.role || !state.lastData) return;
+
+     // Unified call to handle Human drops
+    await executeItemDropForPlayer(state.role, type, target);
+});
+
+
+
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('btn-host').onclick = async () => {
+        const id = Math.floor(1000 + Math.random() * 9000).toString();
+        const wager = parseInt(document.getElementById('wager-input').value) || 100;
+        const seed = Date.now();
+        state.role = 'p1';
+        state.room = id;
+        Engine.setSeed(seed);
+        const grid = Engine.generateSeededGrid();
+        await Multi.createRoom(id, seed, wager, grid);
+        UI.showLobbyWaiting(id);
+        initSync();
+    };
+
+    document.getElementById('btn-join').onclick = async () => {
+        const id = document.getElementById('room-id-input').value.trim();
+        if (!id) return;
+        const data = await Multi.joinRoom(id);
+        if (!data) return UI.showToast("Room Not Found");
+        state.role = 'p2';
+        state.room = id;
+        Engine.setSeed(data.seed);
+        initSync();
+    };
+});
+
+window.addEventListener('broadcastPointer', (e) => {
+    if (state.room && state.role) {
+        // Throttled update to the database
+        Multi.updatePointer(state.room, state.role, e.detail.r, e.detail.c);
+    }
+});
