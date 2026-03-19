@@ -111,6 +111,7 @@ async function runBotTurn() {
     if (!state.active || state.role !== 'p1' || !state.lastData || botIsThinking) return;
     if (state.lastData.status !== 'playing') return;
     if (!state.lastData.players?.p2?.isBot) return;
+    if (state.isBoardLocked || Engine.isAnimating) return;
 
     if (Math.random() > 0.95) return;
 
@@ -120,7 +121,7 @@ async function runBotTurn() {
         const thinkingTime = 400 + Math.random() * 400;
         await new Promise(resolve => setTimeout(resolve, thinkingTime));
 
-        if (!state.active || state.lastData.status !== 'playing') {
+        if (!state.active || state.lastData.status !== 'playing' || state.isBoardLocked || Engine.isAnimating) {
             botIsThinking = false;
             return;
         }
@@ -186,6 +187,7 @@ async function runBotTurn() {
  */
 async function executeItemDropForPlayer(role, type, target) {
     if (!state.room || !state.lastData) return;
+    if (state.isBoardLocked) return;
 
     const playerState = state.lastData.players[role];
     const inventory = playerState?.inventory || { bomb: 0, dynamite: 0 };
@@ -197,6 +199,7 @@ async function executeItemDropForPlayer(role, type, target) {
     }
 
     try {
+        state.isBoardLocked = true;
         // --- PHASE 1: PREPARATION ---
         const coords = Engine.getExplosionCoords(type, target.r, target.c);
 
@@ -209,37 +212,38 @@ async function executeItemDropForPlayer(role, type, target) {
         // We clear the data but don't refill yet
         const explosionResult = Engine.processExplosion(state.lastData.grid, coords);
 
-        // --- PHASE 4: DRAMATIC PAUSE ---
-        // Wait for the .tile-explode CSS (0.4s) to finish shrinking
-        await new Promise(resolve => setTimeout(resolve, 600));
-
-        // --- PHASE 5: REFILL & CASCADE ---
-        // Now that the tiles are "gone," let gravity and new tiles take over
-        const finalCascade = Engine.processGridMatches(explosionResult.grid);
-
-        // --- PHASE 6: SCORE & INVENTORY UPDATES ---
+        // --- PHASE 4: SYNC VOID GRID + IMMEDIATE SCORE ---
         const updatedInventory = { ...inventory };
         updatedInventory[type]--;
 
-        // Add rewards gained from any cascaded matches
+        await Multi.updateGameState(state.room, {
+            grid: explosionResult.grid,
+            [`players/${role}/score`]: (playerState.score || 0) + explosionResult.explosionScore,
+            [`players/${role}/inventory`]: updatedInventory
+        });
+
+        // --- PHASE 5: 400ms VOID WINDOW BEFORE REFILL ---
+        await new Promise(resolve => setTimeout(resolve, 400));
+
+        // --- PHASE 6: REFILL & CASCADE (DELAYED SERVER UPDATE) ---
+        const finalCascade = Engine.processGridMatches(JSON.parse(JSON.stringify(explosionResult.grid)));
+
         if (finalCascade.rewards) {
             updatedInventory.bomb = Math.min((updatedInventory.bomb || 0) + finalCascade.rewards.bomb, 3);
             updatedInventory.dynamite = Math.min((updatedInventory.dynamite || 0) + finalCascade.rewards.dynamite, 2);
         }
 
-        const totalPointsEarned = explosionResult.explosionScore + (finalCascade.totalScore * 10);
-
-        const updates = {
+        await Multi.updateGameState(state.room, {
             grid: finalCascade.grid,
-            [`players/${role}/score`]: (playerState.score || 0) + totalPointsEarned,
+            [`players/${role}/score`]: (playerState.score || 0) + explosionResult.explosionScore + (finalCascade.totalScore * 10),
             [`players/${role}/inventory`]: updatedInventory
-        };
-
-        // --- PHASE 7: SYNC TO SERVER ---
-        await Multi.updateGameState(state.room, updates);
+        });
 
     } catch (error) {
         console.error("Execute Item Error:", error);
+    } finally {
+        Engine.setIsAnimating(false);
+        state.isBoardLocked = false;
     }
 }
 
@@ -251,6 +255,7 @@ async function executeMoveForPlayer(role, origin, target) {
     if (!state.room || !state.lastData || !origin || !target) return;
     if (state.isBoardLocked) return;
 
+    let didLock = false;
     try {
         // 1. Adjacency Guard: Check Manhattan Distance
         const distance = Math.abs(origin.r - target.r) + Math.abs(origin.c - target.c);
@@ -277,9 +282,11 @@ async function executeMoveForPlayer(role, origin, target) {
 
             // Lock until refill finishes (prevents swapping during void/refill)
             state.isBoardLocked = true;
+            didLock = true;
 
             // PHASE 1: Explosion -> create "void" and update score immediately
             coords.forEach(m => { gridCopy[m.r][m.c] = null; });
+            Engine.setIsAnimating(true);
             const immediateMatchPoints = coords.length * 10;
             await Multi.updateGameState(state.room, {
                 grid: gridCopy,
@@ -309,6 +316,7 @@ async function executeMoveForPlayer(role, origin, target) {
     } catch (err) {
         console.error("Execution Error:", err);
     } finally {
+        if (didLock) Engine.setIsAnimating(false);
         state.isBoardLocked = false;
     }
 }

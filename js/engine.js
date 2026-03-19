@@ -2,6 +2,10 @@ let seed = Date.now();
 
 export function setSeed(s) { seed = s; }
 
+// Animation gate: used to keep data in sync with visuals
+export let isAnimating = false;
+export function setIsAnimating(v) { isAnimating = !!v; }
+
 function mulberry32() {
     let t = seed += 0x6D2B79F5;
     t = Math.imul(t ^ t >>> 15, t | 1);
@@ -84,6 +88,7 @@ export function getExplosionCoords(type, r, c) {
  * Does NOT refill yet, allowing the UI to show the "holes" during animation.
  */
 export function processExplosion(grid, coords) {
+    isAnimating = true;
     let tilesDestroyed = 0;
     
     // Create a deep copy to avoid mutating state directly
