@@ -14,7 +14,19 @@ export function updateBalanceUI(balance) {
     const el = document.getElementById('practice-balance');
     if (!el) return;
     const b = Number.isFinite(balance) ? balance : 0;
-    el.innerText = `Practice Balance: ${b}`;
+    const prev = el.getAttribute('data-balance');
+    el.setAttribute('data-balance', String(b));
+    el.innerHTML = `Practice Balance: <span id="practice-balance-amount">${b}</span>`;
+
+    if (prev !== null && prev !== String(b)) {
+        const amt = document.getElementById('practice-balance-amount');
+        if (amt) {
+            amt.classList.remove('balance-spin');
+            // Force reflow so the animation can restart
+            void amt.offsetWidth;
+            amt.classList.add('balance-spin');
+        }
+    }
 }
 
 // Pointer State Tracking
@@ -593,7 +605,13 @@ export function showToast(msg) {
     if (!elements.toast) return;
     elements.toast.innerText = msg;
     elements.toast.classList.remove('hidden');
-    setTimeout(() => elements.toast.classList.add('hidden'), 2000);
+    elements.toast.classList.add('toast-show');
+
+    clearTimeout(elements.toast._hideTimer);
+    elements.toast._hideTimer = setTimeout(() => {
+        elements.toast.classList.remove('toast-show');
+        setTimeout(() => elements.toast.classList.add('hidden'), 220);
+    }, 2000);
 }
 
 

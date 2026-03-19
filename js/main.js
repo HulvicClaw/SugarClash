@@ -40,6 +40,17 @@ function updateHostButtonState() {
     hostBtn.disabled = balance < wagerAmount;
 }
 
+function triggerInsufficientFundsAlert() {
+    const wagerEl = document.getElementById('wager-input');
+    if (!wagerEl) return;
+
+    wagerEl.classList.remove('error-shake');
+    // Force reflow so the animation restarts
+    void wagerEl.offsetWidth;
+    wagerEl.classList.add('error-shake');
+    setTimeout(() => wagerEl.classList.remove('error-shake'), 1000);
+}
+
 function listenToWallet(uid) {
     if (userWalletUnsub) {
         userWalletUnsub();
@@ -427,12 +438,22 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-host').onclick = async () => {
         const id = Math.floor(1000 + Math.random() * 9000).toString();
         const wager = parseInt(document.getElementById('wager-input').value) || 100;
+        const balance = Number.isFinite(currentBalance) ? currentBalance : 0;
+        if (balance < wager) {
+            triggerInsufficientFundsAlert();
+            return;
+        }
+
         const seed = Date.now();
         state.role = 'p1';
         state.room = id;
         Engine.setSeed(seed);
         const grid = Engine.generateSeededGrid();
         await Multi.createRoom(id, seed, wager, grid);
+        try {
+            await navigator.clipboard.writeText(id);
+        } catch {}
+        UI.showToast(`Game Hosted! Room ID ${id} copied to clipboard.`);
         UI.showLobbyWaiting(id);
         initSync();
     };

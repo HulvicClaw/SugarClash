@@ -383,6 +383,21 @@ input::-webkit-inner-spin-button {
     box-shadow: 0 20px 50px rgba(0,0,0,0.5);
 }
 
+#practice-balance {
+    display: inline-block;
+    margin: 6px 0 18px 0;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #00ffff;
+    letter-spacing: 1px;
+    font-weight: 800;
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.35);
+    text-shadow: 0 0 10px rgba(0, 255, 255, 0.35);
+}
+
 .result-card {
     background: #1a1a1a;
     padding: 40px; border-radius: 20px;
@@ -416,6 +431,20 @@ input::-webkit-inner-spin-button {
     box-shadow: 0 0 15px rgba(0, 242, 255, 0.4);
 }
 
+.glass-input.error-shake {
+    border-color: #ff0055;
+    box-shadow: 0 0 10px #ff0055, 0 0 20px #ff0055;
+    animation: wagerErrorShake 0.4s var(--bounce-easing) both;
+}
+
+@keyframes wagerErrorShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(6px); }
+}
+
 
 
 
@@ -427,11 +456,16 @@ input::-webkit-inner-spin-button {
     font-weight: bold;
     cursor: pointer;
     margin: 10px;
-    transition: transform 0.2s var(--bounce-easing), filter 0.2s ease;
+    transition: transform 0.2s var(--bounce-easing), filter 0.2s ease, box-shadow 0.2s ease;
 }
 
 .btn-host:hover, .btn-join:hover, .btn-bot:hover, .btn-primary:hover, .btn-secondary:hover {
     transform: scale(1.05);
+    box-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+}
+
+.btn-host:active, .btn-join:active, .btn-bot:active, .btn-primary:active, .btn-secondary:active {
+    transform: scale(0.95);
 }
 
 .btn-primary, .btn-host { background: var(--p1-color); box-shadow: 0 4px 15px var(--p1-glow); }
@@ -467,13 +501,33 @@ input::-webkit-inner-spin-button {
     position: fixed;
     bottom: 20px;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) translateY(30px);
+    opacity: 0;
     background: rgba(0, 0, 0, 0.8);
     color: white;
     padding: 10px 20px;
     border-radius: 20px;
     border: 1px solid var(--p1-color);
     z-index: 10000;
+    transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 0 10px #8800ff, 0 0 20px #00ffff;
+}
+
+#toast.toast-show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+@keyframes balanceSpin {
+    0% { transform: rotateX(0deg); filter: brightness(1); }
+    50% { transform: rotateX(360deg); filter: brightness(2); }
+    100% { transform: rotateX(720deg); filter: brightness(1.2); }
+}
+
+#practice-balance-amount.balance-spin {
+    display: inline-block;
+    transform-origin: center;
+    animation: balanceSpin 0.5s ease-out;
 }
 
 /* --- Mobile Responsiveness --- */
