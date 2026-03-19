@@ -26,6 +26,41 @@ async function initializeUserWallet(uid) {
     }
 }
 
+let currentBalance = null;
+let userWalletUnsub = null;
+
+function updateHostButtonState() {
+    const wagerEl = document.getElementById('wager-input');
+    const hostBtn = document.getElementById('btn-host');
+    if (!wagerEl || !hostBtn) return;
+
+    const wager = parseInt(wagerEl.value, 10);
+    const wagerAmount = Number.isFinite(wager) ? wager : 0;
+    const balance = Number.isFinite(currentBalance) ? currentBalance : 0;
+    hostBtn.disabled = balance < wagerAmount;
+}
+
+function listenToWallet(uid) {
+    if (userWalletUnsub) {
+        userWalletUnsub();
+        userWalletUnsub = null;
+    }
+
+    userWalletUnsub = firestore
+        .collection('users')
+        .doc(uid)
+        .onSnapshot(
+            (snap) => {
+                const data = snap.exists ? snap.data() : null;
+                const balance = data?.balance;
+                currentBalance = typeof balance === 'number' ? balance : 0;
+                UI.updateBalanceUI(currentBalance);
+                updateHostButtonState();
+            },
+            (err) => console.error('Wallet listener error:', err)
+        );
+}
+
 auth.onAuthStateChanged(async (user) => {
     if (!user) {
         try {
@@ -38,6 +73,7 @@ auth.onAuthStateChanged(async (user) => {
 
     console.log('Signed in uid:', user.uid);
     await initializeUserWallet(user.uid);
+    listenToWallet(user.uid);
 });
 
 let state = {
@@ -382,6 +418,12 @@ window.addEventListener('itemDrop', async (e) => {
 
 
 document.addEventListener('DOMContentLoaded', () => {
+    const wagerEl = document.getElementById('wager-input');
+    if (wagerEl) {
+        wagerEl.addEventListener('input', updateHostButtonState);
+        wagerEl.addEventListener('change', updateHostButtonState);
+    }
+
     document.getElementById('btn-host').onclick = async () => {
         const id = Math.floor(1000 + Math.random() * 9000).toString();
         const wager = parseInt(document.getElementById('wager-input').value) || 100;

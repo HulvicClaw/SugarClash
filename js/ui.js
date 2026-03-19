@@ -10,6 +10,13 @@ export const elements = {
     toast: document.getElementById('toast')
 };
 
+export function updateBalanceUI(balance) {
+    const el = document.getElementById('practice-balance');
+    if (!el) return;
+    const b = Number.isFinite(balance) ? balance : 0;
+    el.innerText = `Practice Balance: ${b}`;
+}
+
 // Pointer State Tracking
 let pointerStart = {
     x: 0,
