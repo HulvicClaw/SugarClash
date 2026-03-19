@@ -222,11 +222,14 @@ async function executeItemDropForPlayer(role, type, target) {
         state.isBoardLocked = true;
         // --- PHASE 1: PREPARATION ---
         const coords = Engine.getExplosionCoords(type, target.r, target.c);
+        const isExplosion = type === 'bomb' || type === 'dynamite';
 
         // --- PHASE 2: VISUAL DESTRUCTION ---
-        // Trigger the CSS animations and screen shake
-        UI.triggerExplosionVFX(coords);
-        UI.triggerImpact(target.r, target.c);
+        // Explosion-only FX at the exact start of the 400ms void window
+        if (isExplosion) {
+            UI.triggerExplosionVFX(coords);
+            UI.triggerImpact(target.r, target.c);
+        }
 
         // --- PHASE 3: DATA DESTRUCTION (Immediate) ---
         // We clear the data but don't refill yet
@@ -347,21 +350,9 @@ async function executeMoveForPlayer(role, origin, target) {
  */
 function initSync() {
     if (!state.room) return;
-    
-    let lastGridJson = "";
 
     Multi.listenToRoom(state.room, (data) => {
         if (!data) return;
-        
-            const currentGridJson = JSON.stringify(data.grid);
-        if (lastGridJson !== "" && currentGridJson !== lastGridJson) {
-            // If it was an explosion (lots of nulls), trigger a shake for BOTH players
-            if (currentGridJson.includes('null')) {
-                UI.triggerImpact(3, 3); // Shake the whole board
-            }
-        }
-
-        lastGridJson = currentGridJson;
 
         state.lastData = data;
 

@@ -589,7 +589,7 @@ export function triggerImpact(r, c) {
     if (tile) {
         const rect = tile.getBoundingClientRect();
         const glow = document.createElement('div');
-        glow.className = 'explosion-glow';
+        glow.className = 'fx-explosion-shockwave';
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
         Object.assign(glow.style, {
