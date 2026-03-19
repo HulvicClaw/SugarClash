@@ -21,6 +21,9 @@ if (!firebase.apps.length) {
 // Export the database instance
 export const db = firebase.database();
 
+// Export the auth service (Firebase v8 namespaced)
+export const auth = firebase.auth();
+
 // Application scoping for the database path
 const appId = 'candy-jar-live';
 

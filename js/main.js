@@ -2,6 +2,25 @@ import * as Engine from './engine.js';
 import * as UI from './ui.js';
 import * as Multi from './multiplayer.js';
 
+// Anonymous auth bootstrapping (Firebase v8 namespaced)
+const auth = Multi.auth;
+auth
+    .setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+    .catch((err) => console.error('Auth persistence error:', err));
+
+auth.onAuthStateChanged(async (user) => {
+    if (!user) {
+        try {
+            await auth.signInAnonymously();
+        } catch (err) {
+            console.error('Anonymous sign-in error:', err);
+        }
+        return;
+    }
+
+    console.log('Signed in uid:', user.uid);
+});
+
 let state = {
     room: null,
     role: null,
