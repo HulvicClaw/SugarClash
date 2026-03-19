@@ -10,6 +10,7 @@ auth
     .catch((err) => console.error('Auth persistence error:', err));
 
 async function ensureUserWallet(user) {
+    console.log('--- Checking Firestore Connectivity ---');
     try {
         if (!user?.uid) return;
         const userRef = db_fs.collection('users').doc(user.uid);
@@ -23,7 +24,26 @@ async function ensureUserWallet(user) {
             });
         }
     } catch (err) {
-        console.error('Wallet init error:', err);
+        const code = err?.code || '';
+        if (code === 'permission-denied') {
+            console.error('Wallet init error [Permission]: Firestore rules rejected read/write on users/{uid}.', err);
+        } else if (
+            code === 'unavailable' ||
+            code === 'failed-precondition' ||
+            code === 'resource-exhausted' ||
+            code === 'deadline-exceeded' ||
+            code === 'aborted' ||
+            code === 'cancelled' ||
+            (typeof err?.message === 'string' && (
+                err.message.toLowerCase().includes('network') ||
+                err.message.toLowerCase().includes('blocked') ||
+                err.message.toLowerCase().includes('fetch')
+            ))
+        ) {
+            console.error('Wallet init error [Network/Ad-blocker]: Firestore request could not reach backend (check connection, blockers, or browser privacy filters).', err);
+        } else {
+            console.error('Wallet init error [Unknown]:', err);
+        }
     }
 }
 
