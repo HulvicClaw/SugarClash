@@ -93,6 +93,7 @@ let state = {
     selected: null,
     activeItem: null,
     active: false,
+    isBoardLocked: false,
     lastData: null,
     timerId: null,
     botInterval: null,
@@ -247,6 +248,7 @@ async function executeItemDropForPlayer(role, type, target) {
  */
 async function executeMoveForPlayer(role, origin, target) {
     if (!state.room || !state.lastData || !origin || !target) return;
+    if (state.isBoardLocked) return;
 
     try {
         // 1. Adjacency Guard: Check Manhattan Distance
@@ -268,18 +270,32 @@ async function executeMoveForPlayer(role, origin, target) {
         const { coords } = Engine.findMatches(gridCopy);
 
         if (coords && coords.length > 0) {
-            // Valid Match Found: Refill and update global state
-            const { totalScore, rewards } = Engine.processGridMatches(gridCopy);
             const playerState = state.lastData.players[role];
             const currentScore = playerState.score || 0;
             const currentInv = playerState.inventory || { bomb: 0, dynamite: 0 };
 
-            const newBombCount = Math.min((currentInv.bomb || 0) + rewards.bomb, 3);
-            const newDynamiteCount = Math.min((currentInv.dynamite || 0) + rewards.dynamite, 2);
+            // Lock until refill finishes (prevents swapping during void/refill)
+            state.isBoardLocked = true;
 
+            // PHASE 1: Explosion -> create "void" and update score immediately
+            coords.forEach(m => { gridCopy[m.r][m.c] = null; });
+            const immediateMatchPoints = coords.length * 10;
             await Multi.updateGameState(state.room, {
                 grid: gridCopy,
-                [`players/${role}/score`]: currentScore + (totalScore * 10),
+                [`players/${role}/score`]: currentScore + immediateMatchPoints
+            });
+
+            // PHASE 2: Delay before gravity/refill (400ms void window)
+            await new Promise(resolve => setTimeout(resolve, 400));
+
+            // PHASE 3: Refill/cascades; apply remaining score + rewards
+            const cascade = Engine.processGridMatches(JSON.parse(JSON.stringify(gridCopy)));
+            const newBombCount = Math.min((currentInv.bomb || 0) + (cascade.rewards?.bomb || 0), 3);
+            const newDynamiteCount = Math.min((currentInv.dynamite || 0) + (cascade.rewards?.dynamite || 0), 2);
+
+            await Multi.updateGameState(state.room, {
+                grid: cascade.grid,
+                [`players/${role}/score`]: currentScore + immediateMatchPoints + (cascade.totalScore * 10),
                 [`players/${role}/inventory/bomb`]: newBombCount,
                 [`players/${role}/inventory/dynamite`]: newDynamiteCount
             });
@@ -291,6 +307,8 @@ async function executeMoveForPlayer(role, origin, target) {
         }
     } catch (err) {
         console.error("Execution Error:", err);
+    } finally {
+        state.isBoardLocked = false;
     }
 }
 
@@ -412,14 +430,14 @@ window.addEventListener('startBotGame', async () => {
 
 window.addEventListener('tileSwipe', async (e) => {
     const { origin, target } = e.detail;
-    if (!state.active || !state.room || !state.lastData) return;
+    if (!state.active || !state.room || !state.lastData || state.isBoardLocked) return;
     await executeMoveForPlayer(state.role, origin, target);
 });
 
 
 window.addEventListener('itemDrop', async (e) => {
     const { type, target } = e.detail;
-    if (!state.room || !state.role || !state.lastData) return;
+    if (!state.room || !state.role || !state.lastData || state.isBoardLocked) return;
 
      // Unified call to handle Human drops
     await executeItemDropForPlayer(state.role, type, target);
