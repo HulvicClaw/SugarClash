@@ -4,14 +4,15 @@ import * as Multi from './multiplayer.js';
 
 // Anonymous auth bootstrapping (Firebase v8 namespaced)
 const auth = Multi.auth;
-const firestore = Multi.firestore;
+const db_fs = Multi.db_fs;
 auth
     .setPersistence(firebase.auth.Auth.Persistence.LOCAL)
     .catch((err) => console.error('Auth persistence error:', err));
 
-async function initializeUserWallet(uid) {
+async function ensureUserWallet(user) {
     try {
-        const userRef = firestore.collection('users').doc(uid);
+        if (!user?.uid) return;
+        const userRef = db_fs.collection('users').doc(user.uid);
         const snap = await userRef.get();
 
         if (!snap.exists) {
@@ -57,7 +58,7 @@ function listenToWallet(uid) {
         userWalletUnsub = null;
     }
 
-    userWalletUnsub = firestore
+    userWalletUnsub = db_fs
         .collection('users')
         .doc(uid)
         .onSnapshot(
@@ -83,7 +84,7 @@ auth.onAuthStateChanged(async (user) => {
     }
 
     console.log('Signed in uid:', user.uid);
-    await initializeUserWallet(user.uid);
+    await ensureUserWallet(user);
     listenToWallet(user.uid);
 });
 

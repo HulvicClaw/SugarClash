@@ -3,7 +3,7 @@
  * Updated with the specific regional Database URL to resolve connection warnings.
  */
 const firebaseConfig = {
-    apiKey: "AIzaSyD_REDACTED_FOR_SECURITY",
+    apiKey: "AIzaSyDZA2RGixp2ppKxhJynQp4IB4_ZudDZeqg",
     authDomain: "candy-jar-pvp.firebaseapp.com",
     // Corrected to the asia-southeast1 regional endpoint
     databaseURL: "https://candy-jar-pvp-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -26,6 +26,8 @@ export const auth = firebase.auth();
 
 // Export Firestore (Firebase v8 namespaced)
 export const firestore = firebase.firestore();
+// Alias requested name to avoid conflicts with RTDB `db`
+export const db_fs = firestore;
 
 // Application scoping for the database path
 const appId = 'candy-jar-live';
