@@ -384,79 +384,6 @@ input::-webkit-inner-spin-button {
 }
 
 
-/* Container for the Profile / Login Screen */
-#profile-page {
-    position: fixed; 
-    inset: 0;
-    background: rgba(0, 0, 0, 0.85); /* Matches your .overlay */
-    display: flex; 
-    justify-content: center; 
-    align-items: center;
-    z-index: 2000;
-    backdrop-filter: blur(10px);
-}
-
-.profile-card {
-    background: rgba(15, 15, 25, 0.9); /* Matches .lobby-card */
-    backdrop-filter: blur(20px);
-    padding: 40px;
-    border-radius: 30px;
-    border: 1px solid rgba(0, 242, 255, 0.2); /* Neon teal tint */
-    color: white;
-    width: 90%;
-    max-width: 400px;
-    text-align: center;
-    box-shadow: 0 0 30px rgba(0, 242, 255, 0.1);
-}
-
-.profile-avatar {
-    width: 80px;
-    height: 80px;
-    background: linear-gradient(45deg, #00f2ff, #0077ff);
-    border-radius: 50%;
-    margin: 0 auto 20px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 2rem;
-    box-shadow: 0 0 20px rgba(0, 242, 255, 0.5);
-}
-
-.stat-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
-    margin-bottom: 25px;
-}
-
-.stat-item {
-    background: rgba(255, 255, 255, 0.05);
-    padding: 15px;
-    border-radius: 15px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.stat-value {
-    display: block;
-    font-size: 1.2rem;
-    font-weight: 800;
-    color: #00f2ff; /* Matches your neon-teal */
-    text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
-}
-
-.stat-label {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 0.6;
-}
-
-/* Reusing your hidden utility */
-.hidden {
-    display: none !important;
-}
-
-
 #practice-balance {
     display: inline-block;
     margin: 6px 0 18px 0;
@@ -518,7 +445,6 @@ input::-webkit-inner-spin-button {
     60% { transform: translateX(-6px); }
     80% { transform: translateX(6px); }
 }
-
 
 
 
@@ -603,6 +529,99 @@ input::-webkit-inner-spin-button {
     transform-origin: center;
     animation: balanceSpin 0.5s ease-out;
 }
+
+
+/* Container for the Profile / Login Screen */
+#profile-page {
+    position: fixed; 
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85); /* Matches your .overlay */
+    display: flex; 
+    justify-content: center; 
+    align-items: center;
+    z-index: 2000;
+    backdrop-filter: blur(10px);
+    
+    transition: opacity 0.3s ease, backdrop-filter 0.3s ease;
+    opacity: 1;
+}
+
+.profile-card {
+    background: rgba(15, 15, 25, 0.9); /* Matches .lobby-card */
+    backdrop-filter: blur(20px);
+    padding: 40px;
+    border-radius: 30px;
+    border: 1px solid rgba(0, 242, 255, 0.2); /* Neon teal tint */
+    color: white;
+    width: 90%;
+    max-width: 400px;
+    text-align: center;
+    box-shadow: 0 0 30px rgba(0, 242, 255, 0.1);
+
+    transform: scale(1);
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* Matches your bounce-easing */
+}
+
+.profile-avatar {
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(45deg, #00f2ff, #0077ff);
+    border-radius: 50%;
+    margin: 0 auto 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 2rem;
+    box-shadow: 0 0 20px rgba(0, 242, 255, 0.5);
+}
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.stat-item {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 15px;
+    border-radius: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stat-value {
+    display: block;
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #00f2ff; /* Matches your neon-teal */
+    text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+}
+
+.stat-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.6;
+}
+
+/* Reusing your hidden utility */
+.hidden {
+    display: none !important;
+    opacity: 0;
+    pointer-events: none;
+}
+
+#profile-page.hidden {
+    opacity: 0;
+    pointer-events: none;
+    display: none !important; /* Overrides the flex display when hidden */
+}
+
+#profile.hidden .profile-card {
+    transform: scale(0.8);
+}
+
+
 
 /* --- Mobile Responsiveness --- */
 @media (max-width: 600px) {

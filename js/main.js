@@ -1,12 +1,35 @@
+/**
+ * Candy Jar Live — main entry
+ * Order: Imports → State → Firebase auth/wallet → UI toggles & economy → Game logic → window bridge → listeners
+ */
 import * as Engine from './engine.js';
 import * as UI from './ui.js';
 import * as Multi from './multiplayer.js';
-// Top of main.js
 import { signInAsGuest } from './multiplayer.js';
 
-// Anonymous auth bootstrapping (Firebase v8 namespaced)
+// --- State & Firebase module handles (v8 namespaced via multiplayer.js) ---
 const auth = Multi.auth;
 const db_fs = Multi.db_fs;
+
+let currentBalance = null;
+let userWalletUnsub = null;
+
+let state = {
+    room: null,
+    role: null,
+    selected: null,
+    activeItem: null,
+    active: false,
+    isBoardLocked: false,
+    lastData: null,
+    timerId: null,
+    botInterval: null,
+    isBotGame: false
+};
+
+let botIsThinking = false;
+
+// --- Firebase auth & wallet ---
 auth
     .setPersistence(firebase.auth.Auth.Persistence.LOCAL)
     .catch((err) => console.error('Auth persistence error:', err));
@@ -49,32 +72,6 @@ async function ensureUserWallet(user) {
     }
 }
 
-
-let currentBalance = null;
-let userWalletUnsub = null;
-
-function updateHostButtonState() {
-    const wagerEl = document.getElementById('wager-input');
-    const hostBtn = document.getElementById('btn-host');
-    if (!wagerEl || !hostBtn) return;
-
-    const wager = parseInt(wagerEl.value, 10);
-    const wagerAmount = Number.isFinite(wager) ? wager : 0;
-    const balance = Number.isFinite(currentBalance) ? currentBalance : 0;
-    hostBtn.disabled = balance < wagerAmount;
-}
-
-function triggerInsufficientFundsAlert() {
-    const wagerEl = document.getElementById('wager-input');
-    if (!wagerEl) return;
-
-    wagerEl.classList.remove('error-shake');
-    // Force reflow so the animation restarts
-    void wagerEl.offsetWidth;
-    wagerEl.classList.add('error-shake');
-    setTimeout(() => wagerEl.classList.remove('error-shake'), 1000);
-}
-
 function listenToWallet(uid) {
     if (userWalletUnsub) {
         userWalletUnsub();
@@ -99,7 +96,7 @@ function listenToWallet(uid) {
 auth.onAuthStateChanged(async (user) => {
     if (!user) {
         try {
-            await auth.signInAnonymously();
+            await signInAsGuest();
         } catch (err) {
             console.error('Anonymous sign-in error:', err);
         }
@@ -111,25 +108,71 @@ auth.onAuthStateChanged(async (user) => {
     listenToWallet(user.uid);
 });
 
-let state = {
-    room: null,
-    role: null,
-    selected: null,
-    activeItem: null,
-    active: false,
-    isBoardLocked: false,
-    lastData: null,
-    timerId: null,
-    botInterval: null,
-    isBotGame: false
-};
+// --- UI: lobby economy ---
+function updateHostButtonState() {
+    const wagerEl = document.getElementById('wager-input');
+    const hostBtn = document.getElementById('btn-host');
+    if (!wagerEl || !hostBtn) return;
 
-let botIsThinking = false;
+    const wager = parseInt(wagerEl.value, 10);
+    const wagerAmount = Number.isFinite(wager) ? wager : 0;
+    const balance = Number.isFinite(currentBalance) ? currentBalance : 0;
+    hostBtn.disabled = balance < wagerAmount;
+}
 
-/**
- * runBotTurn
- * Logic for the AI opponent (Harder than Normal + Strategic Items).
- */
+function triggerInsufficientFundsAlert() {
+    const wagerEl = document.getElementById('wager-input');
+    if (!wagerEl) return;
+
+    wagerEl.classList.remove('error-shake');
+    void wagerEl.offsetWidth;
+    wagerEl.classList.add('error-shake');
+    setTimeout(() => wagerEl.classList.remove('error-shake'), 1000);
+}
+
+// --- UI: profile (Firestore-backed stats) ---
+async function updateProfileStats() {
+    const user = auth.currentUser;
+    const uidEl = document.getElementById('display-uid');
+    const balEl = document.getElementById('display-balance');
+    const bombsEl = document.getElementById('display-bombs');
+
+    if (!user) {
+        if (uidEl) uidEl.textContent = 'ID: —';
+        return;
+    }
+
+    if (uidEl) uidEl.textContent = `ID: ${user.uid}`;
+
+    try {
+        const snap = await db_fs.collection('users').doc(user.uid).get();
+        if (!snap.exists) {
+            if (balEl) balEl.textContent = '—';
+            if (bombsEl) bombsEl.textContent = '—';
+            return;
+        }
+        const data = snap.data();
+        if (balEl) balEl.textContent = data.balance != null ? String(data.balance) : '0';
+        if (bombsEl) bombsEl.textContent = data.inventory?.bomb != null ? String(data.inventory.bomb) : '0';
+    } catch (err) {
+        console.error('updateProfileStats error:', err);
+    }
+}
+
+function openProfile() {
+    const profilePage = document.getElementById('profile-page');
+    if (!profilePage) return;
+    profilePage.classList.toggle('hidden', false);
+    void updateProfileStats();
+}
+
+function closeProfile() {
+    const profilePage = document.getElementById('profile-page');
+    if (!profilePage) return;
+    profilePage.classList.toggle('hidden', true);
+}
+
+// --- Game logic ---
 async function runBotTurn() {
     if (!state.active || state.role !== 'p1' || !state.lastData || botIsThinking) return;
     if (state.lastData.status !== 'playing') return;
@@ -142,7 +185,7 @@ async function runBotTurn() {
 
     try {
         const thinkingTime = 400 + Math.random() * 400;
-        await new Promise(resolve => setTimeout(resolve, thinkingTime));
+        await new Promise((resolve) => setTimeout(resolve, thinkingTime));
 
         if (!state.active || state.lastData.status !== 'playing' || state.isBoardLocked || Engine.isAnimating) {
             botIsThinking = false;
@@ -153,7 +196,6 @@ async function runBotTurn() {
         const hasBomb = (p2Inventory.bomb || 0) > 0;
         const hasDynamite = (p2Inventory.dynamite || 0) > 0;
 
-        // 1. STRATEGIC ITEM USAGE (50% chance if items available)
         if ((hasBomb || hasDynamite) && Math.random() < 0.5) {
             const itemToUse = hasDynamite ? 'dynamite' : 'bomb';
             const target = {
@@ -161,30 +203,22 @@ async function runBotTurn() {
                 c: Math.floor(2 + Math.random() * 4)
             };
 
-            // BOT LINGER FOR ITEMS: 
-            // Show the red glow on the target cell before it explodes
             await Multi.updatePointer(state.room, 'p2', target.r, target.c);
-            await new Promise(resolve => setTimeout(resolve, 600));
+            await new Promise((resolve) => setTimeout(resolve, 600));
 
-            // executeItemDropForPlayer now handles visuals and the 400ms pause
             await executeItemDropForPlayer('p2', itemToUse, target);
 
-            // Clear pointer
             await Multi.updatePointer(state.room, 'p2', null, null);
             botIsThinking = false;
-            return; 
+            return;
         }
 
-        // 2. NORMAL SWIPE LOGIC
         const moves = Engine.findAllPossibleMoves(state.lastData.grid);
         const bestMove = Engine.pickBestMove(moves);
 
         if (bestMove) {
-
-           // Trigger .p2-cursor (bright red glow)
             await Multi.updatePointer(state.room, 'p2', bestMove.origin.r, bestMove.origin.c);
-            // Wait 500ms
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, 500));
 
             if (state.active && state.lastData.status === 'playing') {
                 const isValid = Engine.validateBotMove(state.lastData.grid, bestMove.origin, bestMove.target);
@@ -192,22 +226,16 @@ async function runBotTurn() {
                     await executeMoveForPlayer('p2', bestMove.origin, bestMove.target);
                 }
             }
-            // STEP 2B: CLEANUP
-            // Briefly show the destination tile before hiding the red cursor
             await Multi.updatePointer(state.room, 'p2', bestMove.target.r, bestMove.target.c);
             setTimeout(() => Multi.updatePointer(state.room, 'p2', null, null), 200);
         }
     } catch (err) {
-        console.error("Bot AI Error:", err);
+        console.error('Bot AI Error:', err);
     } finally {
         botIsThinking = false;
     }
 }
 
-/**
- * executeItemDropForPlayer
- * Processes Bomb/Dynamite logic with a multi-stage cinematic flow.
- */
 async function executeItemDropForPlayer(role, type, target) {
     if (!state.room || !state.lastData) return;
     if (state.isBoardLocked) return;
@@ -223,22 +251,16 @@ async function executeItemDropForPlayer(role, type, target) {
 
     try {
         state.isBoardLocked = true;
-        // --- PHASE 1: PREPARATION ---
         const coords = Engine.getExplosionCoords(type, target.r, target.c);
         const isExplosion = type === 'bomb' || type === 'dynamite';
 
-        // --- PHASE 2: VISUAL DESTRUCTION ---
-        // Explosion-only FX at the exact start of the 400ms void window
         if (isExplosion) {
             UI.triggerExplosionVFX(coords);
             UI.triggerImpact(target.r, target.c);
         }
 
-        // --- PHASE 3: DATA DESTRUCTION (Immediate) ---
-        // We clear the data but don't refill yet
         const explosionResult = Engine.processExplosion(state.lastData.grid, coords);
 
-        // --- PHASE 4: SYNC VOID GRID + IMMEDIATE SCORE ---
         const updatedInventory = { ...inventory };
         updatedInventory[type]--;
 
@@ -248,10 +270,8 @@ async function executeItemDropForPlayer(role, type, target) {
             [`players/${role}/inventory`]: updatedInventory
         });
 
-        // --- PHASE 5: 400ms VOID WINDOW BEFORE REFILL ---
-        await new Promise(resolve => setTimeout(resolve, 400));
+        await new Promise((resolve) => setTimeout(resolve, 400));
 
-        // --- PHASE 6: REFILL & CASCADE (DELAYED SERVER UPDATE) ---
         const finalCascade = Engine.processGridMatches(JSON.parse(JSON.stringify(explosionResult.grid)));
 
         if (finalCascade.rewards) {
@@ -264,26 +284,20 @@ async function executeItemDropForPlayer(role, type, target) {
             [`players/${role}/score`]: (playerState.score || 0) + explosionResult.explosionScore + (finalCascade.totalScore * 10),
             [`players/${role}/inventory`]: updatedInventory
         });
-
     } catch (error) {
-        console.error("Execute Item Error:", error);
+        console.error('Execute Item Error:', error);
     } finally {
         Engine.setIsAnimating(false);
         state.isBoardLocked = false;
     }
 }
 
-/**
- * executeMoveForPlayer
- * Refactored with Adjacency Guard and Match Simulation (Gatekeeper Logic).
- */
 async function executeMoveForPlayer(role, origin, target) {
     if (!state.room || !state.lastData || !origin || !target) return;
     if (state.isBoardLocked) return;
 
     let didLock = false;
     try {
-        // 1. Adjacency Guard: Check Manhattan Distance
         const distance = Math.abs(origin.r - target.r) + Math.abs(origin.c - target.c);
         if (distance !== 1) {
             if (role === state.role) {
@@ -292,13 +306,11 @@ async function executeMoveForPlayer(role, origin, target) {
             return;
         }
 
-        // 2. Match Simulation: Create gridCopy and swap tiles
         let gridCopy = JSON.parse(JSON.stringify(state.lastData.grid));
         const temp = gridCopy[origin.r][origin.c];
         gridCopy[origin.r][origin.c] = gridCopy[target.r][target.c];
         gridCopy[target.r][target.c] = temp;
 
-        // 3. Logic Gate: Find matches on the simulated swap
         const { coords } = Engine.findMatches(gridCopy);
 
         if (coords && coords.length > 0) {
@@ -306,12 +318,10 @@ async function executeMoveForPlayer(role, origin, target) {
             const currentScore = playerState.score || 0;
             const currentInv = playerState.inventory || { bomb: 0, dynamite: 0 };
 
-            // Lock until refill finishes (prevents swapping during void/refill)
             state.isBoardLocked = true;
             didLock = true;
 
-            // PHASE 1: Explosion -> create "void" and update score immediately
-            coords.forEach(m => { gridCopy[m.r][m.c] = null; });
+            coords.forEach((m) => { gridCopy[m.r][m.c] = null; });
             Engine.setIsAnimating(true);
             const immediateMatchPoints = coords.length * 10;
             await Multi.updateGameState(state.room, {
@@ -319,10 +329,8 @@ async function executeMoveForPlayer(role, origin, target) {
                 [`players/${role}/score`]: currentScore + immediateMatchPoints
             });
 
-            // PHASE 2: Delay before gravity/refill (400ms void window)
-            await new Promise(resolve => setTimeout(resolve, 400));
+            await new Promise((resolve) => setTimeout(resolve, 400));
 
-            // PHASE 3: Refill/cascades; apply remaining score + rewards
             const cascade = Engine.processGridMatches(JSON.parse(JSON.stringify(gridCopy)));
             const newBombCount = Math.min((currentInv.bomb || 0) + (cascade.rewards?.bomb || 0), 3);
             const newDynamiteCount = Math.min((currentInv.dynamite || 0) + (cascade.rewards?.dynamite || 0), 2);
@@ -334,23 +342,18 @@ async function executeMoveForPlayer(role, origin, target) {
                 [`players/${role}/inventory/dynamite`]: newDynamiteCount
             });
         } else {
-            // 4. Revert Logic: No match found, don't update DB, just shake locally
             if (role === state.role) {
                 UI.triggerShake(origin, target);
             }
         }
     } catch (err) {
-        console.error("Execution Error:", err);
+        console.error('Execution Error:', err);
     } finally {
         if (didLock) Engine.setIsAnimating(false);
         state.isBoardLocked = false;
     }
 }
 
-
-/**
- * initSync
- */
 function initSync() {
     if (!state.room) return;
 
@@ -361,7 +364,7 @@ function initSync() {
 
         requestAnimationFrame(() => {
             UI.renderSharedBoard(data, state.role, state.selected, state.activeItem);
-            
+
             if (data.timeLeft !== undefined && UI.elements.timer) {
                 UI.elements.timer.innerText = data.timeLeft;
             }
@@ -394,9 +397,6 @@ function initSync() {
     });
 }
 
-/**
- * startTimer
- */
 function startTimer() {
     if (state.role !== 'p1' || state.timerId) return;
 
@@ -406,13 +406,13 @@ function startTimer() {
         if (timeLeft <= 0) {
             clearInterval(state.timerId);
             state.timerId = null;
-            
+
             const p1s = state.lastData?.players?.p1?.score || 0;
             const p2s = state.lastData?.players?.p2?.score || 0;
             const winner = p1s > p2s ? 'p1' : (p2s > p1s ? 'p2' : 'draw');
 
-            await Multi.updateGameState(state.room, { 
-                status: 'finished', 
+            await Multi.updateGameState(state.room, {
+                status: 'finished',
                 timeLeft: 0,
                 winner: winner
             });
@@ -422,9 +422,71 @@ function startTimer() {
     }, 1000);
 }
 
-/**
- * startBotGame
- */
+// --- Window bridge (for inline onclick etc.) — after function definitions ---
+window.openProfile = openProfile;
+window.closeProfile = closeProfile;
+
+// --- Event listeners (bottom) ---
+document.addEventListener('DOMContentLoaded', () => {
+    const profileBtn = document.getElementById('profile-btn');
+    if (profileBtn) {
+        profileBtn.addEventListener('click', () => openProfile());
+    }
+
+    const profileBack = document.querySelector('.profile-card .lobby-button');
+    if (profileBack && !profileBack.getAttribute('onclick')) {
+        profileBack.addEventListener('click', () => closeProfile());
+    }
+
+    const wagerEl = document.getElementById('wager-input');
+    if (wagerEl) {
+        wagerEl.addEventListener('input', updateHostButtonState);
+        wagerEl.addEventListener('change', updateHostButtonState);
+    }
+
+    const btnHost = document.getElementById('btn-host');
+    if (btnHost) {
+        btnHost.onclick = async () => {
+            const id = Math.floor(1000 + Math.random() * 9000).toString();
+            const wager = parseInt(document.getElementById('wager-input').value, 10) || 100;
+            const balance = Number.isFinite(currentBalance) ? currentBalance : 0;
+            if (balance < wager) {
+                triggerInsufficientFundsAlert();
+                return;
+            }
+
+            const seed = Date.now();
+            state.role = 'p1';
+            state.room = id;
+            Engine.setSeed(seed);
+            const grid = Engine.generateSeededGrid();
+            await Multi.createRoom(id, seed, wager, grid);
+            try {
+                await navigator.clipboard.writeText(id);
+            } catch {
+                /* ignore */
+            }
+            UI.showToast(`Game Hosted! Room ID ${id} copied to clipboard.`);
+            UI.showLobbyWaiting(id);
+            initSync();
+        };
+    }
+
+    const btnJoin = document.getElementById('btn-join');
+    if (btnJoin) {
+        btnJoin.onclick = async () => {
+            const id = document.getElementById('room-id-input').value.trim();
+            if (!id) return;
+            const data = await Multi.joinRoom(id);
+            if (!data) return UI.showToast('Room Not Found');
+            state.role = 'p2';
+            state.room = id;
+            Engine.setSeed(data.seed);
+            initSync();
+        };
+    }
+});
+
 window.addEventListener('startBotGame', async () => {
     const id = 'BOT-' + Math.floor(1000 + Math.random() * 9000).toString();
     const seed = Date.now();
@@ -457,111 +519,14 @@ window.addEventListener('tileSwipe', async (e) => {
     await executeMoveForPlayer(state.role, origin, target);
 });
 
-
 window.addEventListener('itemDrop', async (e) => {
     const { type, target } = e.detail;
     if (!state.room || !state.role || !state.lastData || state.isBoardLocked) return;
-
-     // Unified call to handle Human drops
     await executeItemDropForPlayer(state.role, type, target);
 });
 
-
-
-
-document.addEventListener('DOMContentLoaded', () => {
-    const wagerEl = document.getElementById('wager-input');
-    if (wagerEl) {
-        wagerEl.addEventListener('input', updateHostButtonState);
-        wagerEl.addEventListener('change', updateHostButtonState);
-    }
-
-    document.getElementById('btn-host').onclick = async () => {
-        const id = Math.floor(1000 + Math.random() * 9000).toString();
-        const wager = parseInt(document.getElementById('wager-input').value) || 100;
-        const balance = Number.isFinite(currentBalance) ? currentBalance : 0;
-        if (balance < wager) {
-            triggerInsufficientFundsAlert();
-            return;
-        }
-
-        const seed = Date.now();
-        state.role = 'p1';
-        state.room = id;
-        Engine.setSeed(seed);
-        const grid = Engine.generateSeededGrid();
-        await Multi.createRoom(id, seed, wager, grid);
-        try {
-            await navigator.clipboard.writeText(id);
-        } catch {}
-        UI.showToast(`Game Hosted! Room ID ${id} copied to clipboard.`);
-        UI.showLobbyWaiting(id);
-        initSync();
-    };
-
-    document.getElementById('btn-join').onclick = async () => {
-        const id = document.getElementById('room-id-input').value.trim();
-        if (!id) return;
-        const data = await Multi.joinRoom(id);
-        if (!data) return UI.showToast("Room Not Found");
-        state.role = 'p2';
-        state.room = id;
-        Engine.setSeed(data.seed);
-        initSync();
-    };
-});
-
-
-
-// --- SCREEN NAVIGATION ---
-function showPage(pageId) {
-    // Hide all pages first
-    document.getElementById('game-container').classList.add('hidden');
-    document.getElementById('profile-page').classList.add('hidden');
-    document.getElementById('landing-page')?.classList.add('hidden');
-
-    // Show the requested one
-    document.getElementById(pageId).classList.remove('hidden');
-}
-
-
-
-// Call this when the 'Profile' button is clicked
-async function handleProfileButtonClick() {
-    showPage('profile-page');
-    const user = window.firebase.auth().currentUser;
-    if (user) {
-        // Fetch data and update the HTML spans we created earlier
-        const doc = await window.firebase.firestore().collection('users').doc(user.uid).get();
-        if (doc.exists) {
-            const data = doc.data();
-            document.getElementById('display-balance').innerText = data.balance || 0;
-            document.getElementById('display-bombs').innerText = data.inventory?.bomb || 0;
-        }
-    }
-}
-
-
-
 window.addEventListener('broadcastPointer', (e) => {
     if (state.room && state.role) {
-        // Throttled update to the database
         Multi.updatePointer(state.room, state.role, e.detail.r, e.detail.c);
     }
 });
-
-
-window.addEventListener('load', async () => {
-    // 1. Wait for Firebase to load
-    const uid = await signInAsGuest();
-    
-    if (uid) {
-        // 2. Ensure their wallet exists in the Sydney database
-        await ensureUserWallet(uid); 
-        
-        // 3. Start the game or show the landing screen
-        console.log("Game Ready for Player:", uid);
-    }
-});
-
-
