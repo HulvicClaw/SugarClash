@@ -38,6 +38,24 @@ const appId = 'candy-jar-live';
  */
 const getRoomRef = (id) => db.ref(`artifacts/${appId}/public/data/rooms/${id}`);
 
+
+// --- GUEST AUTH LOGIC ---
+export async function signInAsGuest() {
+    const firebase = window.firebase;
+    try {
+        const userCredential = await firebase.auth().signInAnonymously();
+        const uid = userCredential.user.uid;
+        console.log("Successfully logged in as Guest:", uid);
+        
+        // Return the UID so main.js can use it to fetch the profile
+        return uid; 
+    } catch (error) {
+        console.error("Auth Error:", error.code, error.message);
+        return null;
+    }
+}
+
+
 export async function createRoom(id, seed, wager, grid) {
     console.log("Creating room in Firebase:", id);
     await getRoomRef(id).set({
@@ -91,3 +109,4 @@ export async function updatePointer(id, role, r, c) {
     // Real-time synchronization of cursor/pointer positions
     await getRoomRef(id).child(`pointers/${role}`).update({ r, c });
 }
+

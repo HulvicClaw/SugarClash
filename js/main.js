@@ -1,6 +1,8 @@
 import * as Engine from './engine.js';
 import * as UI from './ui.js';
 import * as Multi from './multiplayer.js';
+// Top of main.js
+import { signInAsGuest } from './multiplayer.js';
 
 // Anonymous auth bootstrapping (Firebase v8 namespaced)
 const auth = Multi.auth;
@@ -46,6 +48,7 @@ async function ensureUserWallet(user) {
         }
     }
 }
+
 
 let currentBalance = null;
 let userWalletUnsub = null;
@@ -508,9 +511,57 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 });
 
+
+
+// --- SCREEN NAVIGATION ---
+function showPage(pageId) {
+    // Hide all pages first
+    document.getElementById('game-container').classList.add('hidden');
+    document.getElementById('profile-page').classList.add('hidden');
+    document.getElementById('landing-page')?.classList.add('hidden');
+
+    // Show the requested one
+    document.getElementById(pageId).classList.remove('hidden');
+}
+
+
+
+// Call this when the 'Profile' button is clicked
+async function handleProfileButtonClick() {
+    showPage('profile-page');
+    const user = window.firebase.auth().currentUser;
+    if (user) {
+        // Fetch data and update the HTML spans we created earlier
+        const doc = await window.firebase.firestore().collection('users').doc(user.uid).get();
+        if (doc.exists) {
+            const data = doc.data();
+            document.getElementById('display-balance').innerText = data.balance || 0;
+            document.getElementById('display-bombs').innerText = data.inventory?.bomb || 0;
+        }
+    }
+}
+
+
+
 window.addEventListener('broadcastPointer', (e) => {
     if (state.room && state.role) {
         // Throttled update to the database
         Multi.updatePointer(state.room, state.role, e.detail.r, e.detail.c);
     }
 });
+
+
+window.addEventListener('load', async () => {
+    // 1. Wait for Firebase to load
+    const uid = await signInAsGuest();
+    
+    if (uid) {
+        // 2. Ensure their wallet exists in the Sydney database
+        await ensureUserWallet(uid); 
+        
+        // 3. Start the game or show the landing screen
+        console.log("Game Ready for Player:", uid);
+    }
+});
+
+

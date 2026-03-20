@@ -79,14 +79,42 @@
             </div>
         </div>
 
-        <div id="result-overlay" class="overlay hidden"></div>
-        <div id="toast" class="toast hidden"></div>
+
+        <div id="profile-page" class="hidden">
+            <div class="profile-card">
+                <div class="profile-avatar">👤</div>
+                <h2 style="margin-bottom: 5px;">Guest Player</h2>
+                <p id="display-uid" style="font-size: 0.7rem; opacity: 0.4; margin-bottom: 20px;">ID: Loading...</p>
+                
+                <div class="neon-divider"></div>
+
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">Balance</span>
+                        <span id="display-balance" class="stat-value">1,000</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Bombs</span>
+                        <span id="display-bombs" class="stat-value">0</span>
+                    </div>
+                </div>
+
+                <button class="lobby-button" onclick="closeProfile()">BACK TO GAME</button>
+            </div>
+        </div>
+        
+
     </div>
 
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/fireb~ase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-    <script src="js/main.js?v=1.3" type="module"></script>
+
+    <script type="module" src="js/main.js?v=1.3"></script>
+
+
+    
 </body>
 </html>
